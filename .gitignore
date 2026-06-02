@@ -1,0 +1,12 @@
+# Ignore dependencies
+**/node_modules/
+**/.svelte-kit/
+**/build/
+
+# Ignore local environment secrets and keys
+**/.env
+**/.env.*
+!**/.env.example
+
+# Ignore Mac OS system artifacts
+.DS_Store
