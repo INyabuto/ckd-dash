@@ -1,7 +1,10 @@
+// src/routes/auth/launch/+server.ts
 import { redirect } from "@sveltejs/kit";
+import { dev } from "$app/environment"; // 👈 SvelteKit's native environment flag
 import type { RequestHandler } from "./$types";
+import { EPIC_CLIENT_ID } from "$env/static/private";
 
-export const GET: RequestHandler = async ({ url, cookies }) => {
+export const GET: RequestHandler = async ({ url, cookies, request }) => {
   // 1. Grab the 'iss' (Identity/FHIR Server URL) and 'launch' context variables passed by the EHR
   const fhirServiceUrl = url.searchParams.get("iss");
   const launchContextId = url.searchParams.get("launch");
@@ -30,38 +33,39 @@ export const GET: RequestHandler = async ({ url, cookies }) => {
     cookies.set("fhir_service_url", fhirServiceUrl, {
       path: "/",
       httpOnly: true,
-      secure: true,
+      secure: !dev, // Automatically uses false in local dev, true in production/Netlify
+      sameSite: "lax",
     });
     cookies.set("fhir_token_endpoint", tokenEndpoint, {
       path: "/",
       httpOnly: true,
-      secure: true,
+      secure: !dev,
+      sameSite: "lax",
     });
 
     // 4. Build the redirect parameter profile targeting Epic's login tower
     const epicAuthUrl = new URL(authorizeEndpoint);
     epicAuthUrl.searchParams.set("response_type", "code");
-    epicAuthUrl.searchParams.set(
-      "client_id",
-      process.env.EPIC_CLIENT_ID || "your-epic-production-client-id",
-    );
 
-    // Replace the hardcoded redirect_uri line inside your launch file with this:
-    const devMode = url.hostname === "localhost";
-    const redirectUri = devMode
-      ? "http://localhost:5173/auth/callback"
-      : "https://ckd-dash-testing.netlify.app/auth/callback";
+    // Fall back safely to standard environment profiles
+    epicAuthUrl.searchParams.set("client_id", EPIC_CLIENT_ID);
+    // epicAuthUrl.searchParams.set(
+    //   "client_id",
+    //   process.env.EPIC_CLIENT_ID || "[REGISTERED_EPIC_SANDBOX_CLIENT_ID]",
+    // );
+
+    // 🛠️ DYNAMIC RESOLUTION: Read the host directly from the browser's live request headers
+    const requestHost = request.headers.get("host") || url.host;
+    const protocol = dev ? "http" : "https";
+    const redirectUri = `${protocol}://${requestHost}/auth/callback`;
 
     epicAuthUrl.searchParams.set("redirect_uri", redirectUri);
-
-    // epicAuthUrl.searchParams.set(
-    //   "redirect_uri",
-    //   "https://ckd-dash-testing.netlify.app/auth/callback",
-    // );
     epicAuthUrl.searchParams.set(
       "scope",
       "launch patient/Patient.read patient/Observation.read openid fhirUser",
     );
+
+    // Note: We will replace this static string with a real signed state hash in our security pass later
     epicAuthUrl.searchParams.set("state", "secure-random-state-hash-string");
 
     if (launchContextId) {
