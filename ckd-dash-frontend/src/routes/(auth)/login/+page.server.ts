@@ -71,7 +71,7 @@ export const actions: Actions = {
       console.error("System API Validation Loop Failure:", err);
       return fail(500, {
         error:
-          "Internal system gateway error. Data pipeline completely unreachable.",
+          "Internal system gateway error. Aidbox is completely unreachable.",
         username,
       });
     }
