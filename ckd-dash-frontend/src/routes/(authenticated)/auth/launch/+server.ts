@@ -53,6 +53,8 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
     //   "client_id",
     //   process.env.EPIC_CLIENT_ID || "[REGISTERED_EPIC_SANDBOX_CLIENT_ID]",
     // );
+    // 🛠️ FIX 1: Explicitly pass the original incoming EHR system URL as the audience target
+    epicAuthUrl.searchParams.set("aud", fhirServiceUrl);
 
     // 🛠️ DYNAMIC RESOLUTION: Read the host directly from the browser's live request headers
     const requestHost = request.headers.get("host") || url.host;
@@ -60,10 +62,17 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
     const redirectUri = `${protocol}://${requestHost}/auth/callback`;
 
     epicAuthUrl.searchParams.set("redirect_uri", redirectUri);
+
+    // 🛠️ FIX 2: Clean and consolidate scopes to standard open profiles if validation loops fail
     epicAuthUrl.searchParams.set(
       "scope",
-      "launch patient/Patient.read patient/Observation.read openid fhirUser",
+      "launch patient/*.read openid fhirUser",
     );
+
+    // epicAuthUrl.searchParams.set(
+    //   "scope",
+    //   "launch patient/Patient.read patient/Observation.read openid fhirUser",
+    // );
 
     // Note: We will replace this static string with a real signed state hash in our security pass later
     epicAuthUrl.searchParams.set("state", "secure-random-state-hash-string");
