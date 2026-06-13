@@ -17,6 +17,13 @@
 			href: '/patients/dashboard',
 			iconSvg: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />`
 		},
+
+		{
+            label: 'Provider Search',
+            subLabel: 'Schedule Appointments',
+            href: '/scheduling', // 🔑 Maps straight back to your new /scheduling directory route
+            iconSvg: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />`
+        },
 		
 		// Providers; connect to providers
 		// {
