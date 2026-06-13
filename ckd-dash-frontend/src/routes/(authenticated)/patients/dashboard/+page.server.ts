@@ -4,6 +4,7 @@ import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ cookies }) => {
   let patientId = cookies.get("local_patient_id");
+  const sessionToken = cookies.get("session_token"); // 🛠️ ADDED: Fetch the session token to verify auth status
   const headers = { Accept: "application/json" };
 
   const defaultData = {
@@ -76,6 +77,15 @@ export const load: PageServerLoad = async ({ cookies }) => {
       },
     ],
   };
+
+  // 🛠️ ADDED AUTHENTICATION GUARD: If a user just logged out, these cookies will be gone.
+  // We stop right here, bypass all database network requests, and safely return the mockup values.
+  if (!patientId || !sessionToken) {
+    console.log(
+      "🔒 Logout state intercepted: Safely bypassed database queries.",
+    );
+    return defaultData;
+  }
 
   try {
     // 🛠️ MULTI-LAYER BUNDLE PARSING FIX: Covers both standard FHIR and Aidbox variations

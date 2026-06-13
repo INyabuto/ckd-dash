@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import type { Snippet } from 'svelte';
+	import { enhance } from '$app/forms';
 
 	// Svelte 5 children snippet handling standard page slot injections
 	let { children }: { children: Snippet } = $props();
@@ -16,6 +17,14 @@
 			href: '/patients/dashboard',
 			iconSvg: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />`
 		},
+		
+		// Providers; connect to providers
+		// {
+		// 	label: 'Providers',
+		// 	subLabel: 'Manage Providers',
+		// 	href: '/patients/providers',
+		// 	iconSvg: `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />`
+		// },
 		// {
 		// 	label: 'Appointments & Labs',
 		// 	subLabel: 'Schedule & Calendar Timeline',
@@ -84,16 +93,45 @@
 			{/each}
 		</div>
 
-		<!-- Footer Context Component: Identity Metadata Profile and Global Signout -->
-		<footer class="patient-profile-footer">
-			<div class="profile-card">
-				<div class="avatar-capsule" aria-hidden="true">IN</div>
-				<div class="profile-info">
-					<p class="profile-name">Isaiah Nyambuka</p>
-					<a href="/logout" class="signout-trigger">Sign Out of System</a>
-				</div>
-			</div>
-		</footer>
+	<!-- src/routes/(authenticated)/+layout.svelte -->
+<!-- Footer Context Component: Identity Metadata Profile and Global Signout -->
+<footer class="patient-profile-footer">
+    <div class="profile-card">
+        <div class="avatar-capsule" aria-hidden="true">
+            {page.data?.patient?.name 
+                ? page.data.patient.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() 
+                : 'PN'}
+        </div>
+        <div class="profile-info">
+            <p class="profile-name">{page.data?.patient?.name || 'Patricia Noelle'}</p>
+			<!-- 🛠️ SWAPPED HERE: The bulletproof native form fallback (no use:enhance) -->
+                    <form action="/logout" method="POST" class="signout-form-container">
+                        <button type="submit" class="signout-submit-button">
+                            Sign Out of System
+                        </button>
+                    </form>
+            
+            <!-- 🛠️ INTERCEPT FIX: Forces a client-side window redirection callback
+            <form 
+                action="/logout" 
+                method="POST" 
+                use:enhance={() => {
+                    return async ({ result }) => {
+                        // If the backend responds with a redirect rule, force the browser window over immediately
+                        if (result.type === 'redirect') {
+                            window.location.href = result.location;
+                        }
+                    };
+                }} 
+                class="signout-form-container"
+            >
+                <button type="submit" class="signout-submit-button">
+                    Sign Out of System
+                </button>
+            </form> -->
+        </div>
+    </div>
+</footer>
 
 	</nav>
 
@@ -354,21 +392,7 @@
 		font-weight: 700;
 		margin: 0;
 	}
-	.signout-trigger {
-		color: #94a3b8;
-		font-size: 0.875rem;
-		font-weight: 600;
-		text-decoration: underline;
-		transition: color 0.1s ease;
-	}
-	.signout-trigger:hover, .signout-trigger:focus {
-		color: #f43f5e; /* Prominent warning crimson tint */
-		outline: none;
-	}
-	.signout-trigger:focus-visible {
-		outline: 2px solid #f97316;
-		outline-offset: 2px;
-	}
+	
 
 	/* --------------------------------------------------
 	 * Strict Responsive Safety Layout Adjustments

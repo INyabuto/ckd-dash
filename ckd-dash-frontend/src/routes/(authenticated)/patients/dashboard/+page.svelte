@@ -1,26 +1,26 @@
 <script lang="ts">
   import type { PageData } from './$types';
 
-  // 🛠️ SVELTE 5 RUNES FIX: Destructure the data prop cleanly from $props()
+ // SVELTE 5 RUNES: Explicit props destructuring boundary
   let { data }: { data: PageData } = $props();
 
-  // Create local reactive states derived from the incoming server data
+  // Turning these into strict derived expressions
   let patient = $derived(data.patient);
   let appointments = $derived(data.appointments);
   let telemetryKPIs = $derived(data.telemetryKPIs);
   
-  // Use a deep reactive state array for handling medication checklist toggles
-  let localMedications = $state([...data.medications]);
+  // 🛠️ FIX: Add the explicit array type definition here!
+  let localMedications = $state<typeof data.medications>([]);
 
-  // Keep local state in sync if the server re-validates/refreshes the load function
+  // Safely sync state using an explicit effect bound to the derived data stream
   $effect(() => {
     localMedications = [...data.medications];
   });
 
-  // Helper function to map percentage to needle rotation
+  // Maps telemetry metrics into visual needle rotation vectors
   const getAngle = (pct: number) => (pct / 100) * 180 - 90;
 
-  // Accessibility Color Mapper
+  // High-contrast accessibility color matrix
   function getThemeColors(type: string) {
     const themes: Record<string, { text: string; bg: string; border: string }> = {
       low:      { text: "#B7950B", bg: "#FEF9E7", border: "#F9E79F" },
@@ -114,9 +114,10 @@
     </div>
   </section>
 
+<!-- 💊 MEDICATIONS CHECKLIST TRACKER -->
   <section class="card-section" aria-labelledby="meds-heading">
     <h2 id="meds-heading">💊 Daily Medications</h2>
-    <p class="section-instruction">Tap the big box next to the medication when you have taken it today.</p>
+    <p class="section-instruction">Tap the box next to the medication when you have taken it today.</p>
     
     <div class="meds-container">
       {#each localMedications as med}
@@ -126,7 +127,16 @@
             <h3>{med.name}</h3>
             <p class="dosage-text">Dosage: <strong>{med.dose}</strong> — {med.purpose}</p>
           </div>
-          <button type="button" class="action-target-box" class:checked={med.taken} style={!med.taken ? `border-color: ${theme.text}; color: ${theme.text}; background-color: ${theme.bg}` : ''} on:click={() => toggleMedication(med.id)} aria-label="Mark {med.name} as {med.taken ? 'not taken' : 'taken'}">
+          
+          <!-- 🛠️ FIXED: Transformed deprecated 'on:click' into modern Svelte 5 'onclick' attribute -->
+          <button 
+            type="button" 
+            class="action-target-box" 
+            class:checked={med.taken} 
+            style={!med.taken ? `border-color: ${theme.text}; color: ${theme.text}; background-color: ${theme.bg}` : ''} 
+            onclick={() => toggleMedication(med.id)} 
+            aria-label="Mark {med.name} as {med.taken ? 'not taken' : 'taken'}"
+          >
             {#if med.taken}
               <span class="check-icon">✓</span> Taken
             {:else}
