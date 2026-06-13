@@ -1,83 +1,279 @@
+// src/routes/auth/callback/+server.ts
 import { redirect } from "@sveltejs/kit";
+import { dev } from "$app/environment";
+import { EPIC_CLIENT_ID, AIDBOX_CLIENT_SECRET } from "$env/static/private";
+import { PUBLIC_AIDBOX_URL } from "$env/static/public";
 import type { RequestHandler } from "./$types";
 
-export const GET: RequestHandler = async ({ url, cookies }) => {
-  // 1. Capture the temporary code and verification hash returned from Epic
-  const authorizationCode = url.searchParams.get("code");
+async function safeJsonParse(response: Response) {
+  if (!response.ok) {
+    console.warn(`Epic sub-gateway returned non-OK status: ${response.status}`);
+    return null;
+  }
+  const text = await response.text();
+  if (!text || text.trim().length === 0) return null;
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return null;
+  }
+}
 
-  // 2. Fetch our cached environmental details from our state cookies
+export const GET: RequestHandler = async ({ url, cookies, request }) => {
+  const authorizationCode = url.searchParams.get("code");
   const tokenEndpoint = cookies.get("fhir_token_endpoint");
-  const fhirServiceUrl = cookies.get("fhir_service_url");
+  const fhirServiceUrl =
+    cookies.get("fhir_service_url") ||
+    "https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4";
 
   if (!authorizationCode || !tokenEndpoint) {
-    return new Response(
-      "SMART on FHIR Callback missing code token signatures.",
-      { status: 400 },
-    );
+    return new Response("Missing required authentication signatures.", {
+      status: 400,
+    });
   }
 
   try {
-    // Dynamically determine the redirect URI based on where the app is running
-    const devMode = url.hostname === "localhost";
-    const redirectUri = devMode
-      ? "http://localhost:5173/auth/callback"
-      : "https://ckd-dash-testing.netlify.app/auth/callback";
+    const requestHost = request.headers.get("host") || url.host;
+    const protocol = dev ? "http" : "https";
+    const redirectUri = `${protocol}://${requestHost}/auth/callback`;
 
-    // 3. The Code-for-Token Token Trade (OAuth 2.0 Authorization Code Grant)
     const tokenExchangeResponse = await fetch(tokenEndpoint, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code: authorizationCode,
-        redirect_uri: redirectUri, //  Replaced the hardcoded string with our dynamic variable
-        client_id:
-          process.env.EPIC_CLIENT_ID || "your-epic-production-client-id",
+        redirect_uri: redirectUri,
+        client_id: EPIC_CLIENT_ID,
       }),
     });
 
     if (!tokenExchangeResponse.ok) {
-      const errorBody = await tokenExchangeResponse.text();
-      console.error(
-        "Epic Identity Verification Token Swap Rejected:",
-        errorBody,
-      );
       return new Response("EHR Identity Verification Loop Denied Access.", {
         status: 401,
       });
     }
 
-    // 4. Parse the cryptographically structured session packet
     const smartTokenDetails = await tokenExchangeResponse.json();
-
-    // CRITICAL SPEC DETAILS: Epic returns the actual Patient ID directly inside the token package!
     const epicPatientId = smartTokenDetails.patient;
     const fhirAccessToken = smartTokenDetails.access_token;
 
-    // 5. Save the live EHR connection tokens into encrypted session cookies
-    cookies.set("ehr_access_token", fhirAccessToken, {
+    const epicHeaders = {
+      Authorization: `Bearer ${fhirAccessToken}`,
+      Accept: "application/fhir+json",
+    };
+
+    const [patientRaw, medsRaw, carePlanRaw, obsRaw] = await Promise.all([
+      fetch(`${fhirServiceUrl}/Patient/${epicPatientId}`, {
+        headers: epicHeaders,
+      }).then(safeJsonParse),
+      fetch(
+        `${fhirServiceUrl}/MedicationRequest?patient=${epicPatientId}&status=active`,
+        { headers: epicHeaders },
+      ).then(safeJsonParse),
+      fetch(
+        `${fhirServiceUrl}/CarePlan?patient=${epicPatientId}&category=assess-plan`,
+        { headers: epicHeaders },
+      ).then(safeJsonParse),
+      fetch(
+        `${fhirServiceUrl}/Observation?patient=${epicPatientId}&code=62238-1,2160-0,2339-0,85354-9`,
+        { headers: epicHeaders },
+      ).then(safeJsonParse),
+    ]);
+
+    const transactionEntries: any[] = [];
+
+    // 1. Scrub Patient Data
+    if (patientRaw && patientRaw.resourceType === "Patient") {
+      const cleanPatient = {
+        resourceType: "Patient",
+        id: patientRaw.id,
+        active: true,
+        name: patientRaw.name || [{ use: "official", text: "Valued Patient" }],
+        gender: patientRaw.gender || "unknown",
+        birthDate: patientRaw.birthDate || "1970-01-01",
+      };
+      transactionEntries.push({
+        request: { method: "PUT", url: `Patient/${cleanPatient.id}` },
+        resource: cleanPatient,
+      });
+    }
+
+    // 2. Scrub CarePlan Data
+    if (carePlanRaw && Array.isArray(carePlanRaw.entry)) {
+      carePlanRaw.entry.forEach((e: any) => {
+        if (e?.resource?.id && e.resource.resourceType === "CarePlan") {
+          const cleanCarePlan = {
+            resourceType: "CarePlan",
+            id: e.resource.id,
+            status: e.resource.status || "active",
+            intent: e.resource.intent || "plan",
+            subject: { reference: `Patient/${epicPatientId}` },
+            title: e.resource.title || "Clinical Care Plan",
+            description:
+              e.resource.description ||
+              e.resource.category?.[0]?.text ||
+              "Synchronized Itinerary",
+          };
+          transactionEntries.push({
+            request: { method: "PUT", url: `CarePlan/${cleanCarePlan.id}` },
+            resource: cleanCarePlan,
+          });
+        }
+      });
+    }
+    //console.log(medsRaw);
+
+    // // 3. 🛠️ AIDBOX NATIVE TRANSACTION FIX: Map explicitly to Aidbox native expectations
+    // if (medsRaw && Array.isArray(medsRaw.entry)) {
+    //   medsRaw.entry.forEach((e: any) => {
+    //     if (
+    //       e?.resource?.id &&
+    //       e.resource.resourceType === "MedicationRequest"
+    //     ) {
+    //       const rawMed = e.resource;
+
+    //       // Safely capture the descriptive title of the medication from Epic's format
+    //       const medText =
+    //         rawMed.medicationReference?.display ||
+    //         rawMed.medicationCodeableConcept?.text ||
+    //         "Unassigned Medication";
+
+    //       const cleanMedRequest = {
+    //         resourceType: "MedicationRequest",
+    //         id: rawMed.id,
+    //         status: rawMed.status || "active",
+    //         intent: rawMed.intent || "order",
+
+    //         // Link back to the patient using Aidbox native object references
+    //         patient: {
+    //           id: epicPatientId,
+    //           resourceType: "Patient",
+    //         },
+
+    //         // 🛠️ FIX: Fulfill the mandatory requirement using Aidbox Native reference format
+    //         medication: {
+    //           id: `med-desc-${rawMed.id}`,
+    //           resourceType: "Medication",
+    //         },
+
+    //         // 🛠️ FIX: Store the actual descriptive text inside a clean extension value block
+    //         extension: [
+    //           {
+    //             url: "http://aidbox.local/extensions/medication-display-name",
+    //             value: medText,
+    //           },
+    //         ],
+
+    //         // 🛠️ FIX: Flatten out the complex dosage instruction down to a single text primitive
+    //         // This safely bypasses 'unknown key :doseQuantity' and 'asNeededBoolean' schema errors
+    //         dosageInstruction: [
+    //           {
+    //             text:
+    //               rawMed.dosageInstruction?.[0]?.text ||
+    //               "Take as directed by your physician.",
+    //           },
+    //         ],
+    //       };
+
+    //       transactionEntries.push({
+    //         request: {
+    //           method: "PUT",
+    //           url: `MedicationRequest/${cleanMedRequest.id}`,
+    //         },
+    //         resource: cleanMedRequest,
+    //       });
+    //       console.log(cleanMedRequest);
+    //     }
+    //   });
+    // }
+
+    // 4. Scrub Observation Data (eGFR, Creatinine, Glucose, BP)
+    if (obsRaw && Array.isArray(obsRaw.entry)) {
+      obsRaw.entry.forEach((e: any) => {
+        if (e?.resource?.id && e.resource.resourceType === "Observation") {
+          const rawObs = e.resource;
+
+          // Build a clean observation resource, stripping proprietary elements
+          const cleanObs: any = {
+            resourceType: "Observation",
+            id: rawObs.id,
+            status: rawObs.status || "final",
+            code: rawObs.code,
+            subject: { reference: `Patient/${epicPatientId}` },
+            effectiveDateTime:
+              rawObs.effectiveDateTime || new Date().toISOString(),
+          };
+
+          // Maintain values for composite (BP) or standard single values
+          if (rawObs.valueQuantity) {
+            cleanObs.valueQuantity = rawObs.valueQuantity;
+          }
+
+          if (rawObs.component) {
+            cleanObs.component = rawObs.component;
+          }
+
+          transactionEntries.push({
+            request: { method: "PUT", url: `Observation/${cleanObs.id}` },
+            resource: cleanObs,
+          });
+        }
+      });
+    }
+
+    // 5. Commit Transaction Bundle to Aidbox
+    if (transactionEntries.length > 0) {
+      const aidboxBundle = {
+        resourceType: "Bundle",
+        type: "transaction",
+        entry: transactionEntries,
+      };
+
+      const aidboxAuth = Buffer.from(`root:${AIDBOX_CLIENT_SECRET}`).toString(
+        "base64",
+      );
+      const aidboxWriteResponse = await fetch(`${PUBLIC_AIDBOX_URL}/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Basic ${aidboxAuth}`,
+        },
+        body: JSON.stringify(aidboxBundle),
+      });
+
+      if (!aidboxWriteResponse.ok) {
+        const errorContent = await aidboxWriteResponse.text();
+        console.error("Aidbox Rejected structural write:", errorContent);
+        return new Response(
+          `Aidbox Database Rejected Ingestion. Reason: ${errorContent}`,
+          { status: 500 },
+        );
+      }
+    }
+
+    cookies.set("session_token", "fhir_session_validated", {
       path: "/",
       httpOnly: true,
-      secure: true,
-      sameSite: "strict",
-      maxAge: smartTokenDetails.expires_in || 3600,
+      secure: !dev,
+      sameSite: "lax",
+      maxAge: 1800,
     });
-
-    cookies.set("ehr_target_patient_id", epicPatientId, {
+    cookies.set("local_patient_id", epicPatientId, {
       path: "/",
       httpOnly: true,
-      secure: true,
+      secure: !dev,
+      sameSite: "lax",
+      maxAge: 1800,
     });
 
-    // Handshake complete. Route them straight to a specialty Epic data renderer tab!
-    throw redirect(303, "/patients/external-ehr-sync");
+    throw redirect(303, "/patients/dashboard");
   } catch (err: any) {
     if (err.status === 303) throw err;
-    console.error("SMART on FHIR Callback Exchange Execution Blocked:", err);
-    return new Response("Internal error occurred parsing secure EHR tokens.", {
-      status: 500,
-    });
+    console.error("Critical Ingestion Inbound Pipeline Failure Trace:", err);
+    return new Response(
+      `Data Ingestion Flow Broke Down. Error details: ${err.message || err}`,
+      { status: 500 },
+    );
   }
 };
