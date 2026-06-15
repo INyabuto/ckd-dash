@@ -230,9 +230,17 @@ export const GET: RequestHandler = async ({ url, cookies, request }) => {
         entry: transactionEntries,
       };
 
-      const aidboxAuth = Buffer.from(`root:${AIDBOX_CLIENT_SECRET}`).toString(
-        "base64",
-      );
+      // 🟩 FIX: Automatically use "root" locally and "ckd-dash-ui" when live on Netlify
+      const aidboxClientId = dev ? "root" : "ckd-dash-ui";
+
+      // Dynamically combine the correct client ID with your client secret token
+      const aidboxAuth = Buffer.from(
+        `${aidboxClientId}:${AIDBOX_CLIENT_SECRET}`,
+      ).toString("base64");
+
+      // const aidboxAuth = Buffer.from(`root:${AIDBOX_CLIENT_SECRET}`).toString(
+      //   "base64",
+      // );
       const aidboxWriteResponse = await fetch(`${PUBLIC_AIDBOX_URL}/`, {
         method: "POST",
         headers: {
