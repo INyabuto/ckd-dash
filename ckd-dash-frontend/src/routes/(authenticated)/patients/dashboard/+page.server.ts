@@ -1,11 +1,24 @@
 // src/routes/(authenticated)/patients/dashboard/+page.server.ts
+import { dev } from "$app/environment";
+import { AIDBOX_CLIENT_SECRET } from "$env/static/private";
 import { PUBLIC_AIDBOX_URL } from "$env/static/public";
 import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ cookies }) => {
   let patientId = cookies.get("local_patient_id");
   const sessionToken = cookies.get("session_token"); // 🛠️ ADDED: Fetch the session token to verify auth status
-  const headers = { Accept: "application/json" };
+  // 🟩 FIX: Authenticate your database requests so the cloud lets you read the patient's name
+  const aidboxClientId = dev ? "root" : "ckd-dash-ui";
+  const aidboxAuth = Buffer.from(
+    `${aidboxClientId}:${AIDBOX_CLIENT_SECRET}`,
+  ).toString("base64");
+
+  const headers = {
+    Accept: "application/fhir+json",
+    Authorization: `Basic ${aidboxAuth}`, // ◄── Passes authorization safely online
+  };
+
+  // const headers = { Accept: "application/json" };
 
   const defaultData = {
     patient: {
